@@ -28,6 +28,13 @@ def generate_report(
             return f"{value:.6g}"
         return str(value) if value is not None else "Not available"
 
+    def yes_no_unknown(value: Any) -> str:
+        if value is True:
+            return "Yes"
+        if value is False:
+            return "No"
+        return "Unknown"
+
     fatal = bool(diagnostics.get("fatal_error"))
     completed = bool(diagnostics.get("solver_completed"))
 
@@ -46,7 +53,7 @@ def generate_report(
     errors = diagnostics.get("errors", [])
     courant_values = diagnostics.get("courant_max", [])
 
-    # Courant statistics.
+    # Validate Courant values before calculating statistics.
     valid_courant = []
     for value in courant_values:
         try:
@@ -76,7 +83,9 @@ def generate_report(
     def list_html(items: list[Any], empty_message: str) -> str:
         if not items:
             return f"<li>{escape(empty_message)}</li>"
-        return "".join(f"<li>{escape(item)}</li>" for item in items)
+        return "".join(
+            f"<li>{escape(item)}</li>" for item in items
+        )
 
     # Residual summary table.
     residuals = (
@@ -86,10 +95,10 @@ def generate_report(
     )
 
     residual_rows = []
+
     for variable, metrics in sorted(residuals.items()):
         ratio = metrics.get("reduction_ratio")
         ratio_text = "Undefined" if ratio is None else fmt(ratio)
-        below = metrics.get("below_tolerance")
 
         residual_rows.append(
             "<tr>"
@@ -97,29 +106,52 @@ def generate_report(
             f"<td>{escape(fmt(metrics.get('initial')))}</td>"
             f"<td>{escape(fmt(metrics.get('final')))}</td>"
             f"<td>{escape(ratio_text)}</td>"
-            f"<td>{'Yes' if below is True else 'No' if below is False else 'Unknown'}</td>"
+            f"<td>{escape(yes_no_unknown(metrics.get('below_tolerance')))}</td>"
+            f"<td>{escape(yes_no_unknown(metrics.get('decreasing_overall')))}</td>"
+            f"<td>{escape(yes_no_unknown(metrics.get('monotonic_decrease')))}</td>"
+            f"<td>{escape(fmt(metrics.get('increases_count')))}</td>"
+            f"<td>{escape(fmt(metrics.get('sample_count')))}</td>"
+            f"<td>{escape(fmt(metrics.get('mean_solver_iterations')))}</td>"
             "</tr>"
         )
 
     if residual_rows:
         residual_table = (
             "<table><thead><tr>"
-            "<th>Variable</th><th>Initial residual</th>"
-            "<th>Final residual</th><th>Final / initial</th>"
-            "<th>Below tolerance</th></tr></thead><tbody>"
+            "<th>Variable</th>"
+            "<th>Initial residual</th>"
+            "<th>Final residual</th>"
+            "<th>Final / initial</th>"
+            "<th>Below tolerance</th>"
+            "<th>Decreasing overall</th>"
+            "<th>Monotonic non-increase</th>"
+            "<th>Residual increases</th>"
+            "<th>Samples</th>"
+            "<th>Mean solver iterations</th>"
+            "</tr></thead><tbody>"
             + "".join(residual_rows)
             + "</tbody></table>"
         )
     else:
         residual_table = "<p>No residual analysis was supplied.</p>"
 
-    # Copy plots into the report's own folder so relative image links work.
+    residual_note = (
+        residual_analysis.get("note", "")
+        if residual_analysis
+        else ""
+    )
+    residual_note_html = (
+        f"<p class='explanation'>{escape(residual_note)}</p>"
+        if residual_note
+        else ""
+    )
+
+    # Copy plots into the report folder so relative image links work.
     plot_dir = output.parent / "residual_plots"
     plot_images = []
 
     if residuals and plot_dir.is_dir():
         for variable in sorted(residuals):
-            # Prevent unexpected variable names from becoming file paths.
             safe_name = "".join(
                 char for char in str(variable)
                 if char.isalnum() or char in "_-"
@@ -131,7 +163,10 @@ def generate_report(
             if not image_path.is_file():
                 continue
 
-            relative_image = image_path.relative_to(output.parent).as_posix()
+            relative_image = image_path.relative_to(
+                output.parent
+            ).as_posix()
+
             plot_images.append(
                 "<figure class='plot-card'>"
                 f"<img src='{escape(relative_image)}' "
@@ -141,7 +176,9 @@ def generate_report(
             )
 
     plots_html = (
-        "<div class='plot-grid'>" + "".join(plot_images) + "</div>"
+        "<div class='plot-grid'>"
+        + "".join(plot_images)
+        + "</div>"
         if plot_images
         else (
             "<p>No residual plots found. Generate plots in the "
@@ -150,7 +187,12 @@ def generate_report(
     )
 
     safe_diagnostics = escape(
-        json.dumps(diagnostics, indent=2, ensure_ascii=False, default=str)
+        json.dumps(
+            diagnostics,
+            indent=2,
+            ensure_ascii=False,
+            default=str,
+        )
     )
     safe_residuals = escape(
         json.dumps(
@@ -161,8 +203,12 @@ def generate_report(
         )
     )
 
-    generated = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    log_file = escape(diagnostics.get("file", "Not specified"))
+    generated = datetime.now(timezone.utc).isoformat(
+        timespec="seconds"
+    )
+    log_file = escape(
+        diagnostics.get("file", "Not specified")
+    )
 
     report_html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -232,7 +278,9 @@ h2 {{
   overflow-wrap: anywhere;
 }}
 table {{
+  display: block;
   width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
   margin: 14px 0 22px;
 }}
@@ -243,6 +291,10 @@ th, td {{
   overflow-wrap: anywhere;
 }}
 th {{ background: var(--surface); }}
+.explanation {{
+  color: var(--muted);
+  font-size: 0.94em;
+}}
 .plot-grid {{
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -299,80 +351,118 @@ footer {{
   <p class="status">{escape(status)}</p>
 </header>
 
-<h2>Report information</h2>
-<p><strong>Generated (UTC):</strong> {escape(generated)}</p>
-<p><strong>OpenFOAM log:</strong> {log_file}</p>
+<section>
+  <h2>Report information</h2>
+  <p><strong>Generated (UTC):</strong> {escape(generated)}</p>
+  <p><strong>OpenFOAM log:</strong> {log_file}</p>
+</section>
 
-<h2>Diagnostic overview</h2>
-<div class="summary-grid">
-  <div class="metric">
-    <div class="label">Solver completion</div>
-    <div class="value">{'Confirmed' if completed else 'Not confirmed'}</div>
+<section>
+  <h2>Diagnostic overview</h2>
+  <div class="summary-grid">
+    <div class="metric">
+      <div class="label">Solver completion</div>
+      <div class="value">{'Confirmed' if completed else 'Not confirmed'}</div>
+    </div>
+    <div class="metric">
+      <div class="label">Fatal error detected</div>
+      <div class="value">{'Yes' if fatal else 'No'}</div>
+    </div>
+    <div class="metric">
+      <div class="label">Maximum Courant number</div>
+      <div class="value">{escape(fmt(max_courant))}</div>
+    </div>
+    <div class="metric">
+      <div class="label">Residual records</div>
+      <div class="value">{escape(fmt(diagnostics.get('residual_records')))}</div>
+    </div>
   </div>
-  <div class="metric">
-    <div class="label">Fatal error detected</div>
-    <div class="value">{'Yes' if fatal else 'No'}</div>
-  </div>
-  <div class="metric">
-    <div class="label">Maximum Courant number</div>
-    <div class="value">{escape(fmt(max_courant))}</div>
-  </div>
-  <div class="metric">
-    <div class="label">Residual records</div>
-    <div class="value">{escape(diagnostics.get('residual_records', 'Not available'))}</div>
-  </div>
-</div>
+  <ul>{list_html(summary_items, 'No diagnostic summary available.')}</ul>
+</section>
 
-<ul>{list_html(summary_items, "No summary messages.")}</ul>
+<section>
+  <h2>Courant numbers</h2>
+  <table>
+    <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Number of valid samples</td><td>{len(valid_courant)}</td></tr>
+      <tr><td>Maximum Courant number</td><td>{escape(fmt(max_courant))}</td></tr>
+      <tr><td>Final reported Courant number</td><td>{escape(fmt(final_courant))}</td></tr>
+      <tr><td>Reporting threshold</td><td>{escape(fmt(threshold))}</td></tr>
+      <tr><td>Samples above threshold</td><td>{escape(fmt(exceedances))}</td></tr>
+    </tbody>
+  </table>
+  <p class="explanation">The threshold is a diagnostic flag, not a universal stability limit. Interpret it according to the solver, time scheme, mesh and case settings.</p>
+</section>
 
-<h2>Courant numbers</h2>
-<table>
-<tr><th>Metric</th><th>Value</th></tr>
-<tr><td>Number of valid samples</td><td>{len(valid_courant)}</td></tr>
-<tr><td>Maximum Courant number</td><td>{escape(fmt(max_courant))}</td></tr>
-<tr><td>Final reported Courant number</td><td>{escape(fmt(final_courant))}</td></tr>
-<tr><td>Reporting threshold</td><td>{escape(fmt(threshold))}</td></tr>
-<tr><td>Samples above threshold</td><td>{escape(exceedances)}</td></tr>
-</table>
-<p>The threshold is a diagnostic flag, not a universal stability limit.
-Interpret it according to the solver, time scheme, mesh and case settings.</p>
+<section>
+  <h2>Warnings</h2>
+  <ul>{list_html(warnings, 'No warnings detected by the log parser.')}</ul>
+</section>
 
-<h2>Warnings</h2>
-<ul>{list_html(warnings, "No warnings detected by the log parser.")}</ul>
+<section>
+  <h2>Errors</h2>
+  <ul>{list_html(errors, 'No error messages detected by the log parser.')}</ul>
+</section>
 
-<h2>Errors</h2>
-<ul>{list_html(errors, "No error messages detected by the log parser.")}</ul>
+<section>
+  <h2>Residual analysis</h2>
+  {residual_table}
+  {residual_note_html}
+</section>
 
-<h2>Residual analysis</h2>
-{residual_table}
-
-<h2>Residual convergence plots</h2>
-{plots_html}
+<section>
+  <h2>Residual convergence plots</h2>
+  {plots_html}
+</section>
 
 <div class="note">
-<strong>Engineering limitation:</strong>
-A completion marker and low residuals do not independently establish
-convergence or physical accuracy. Review residual histories, conservation
-balances, monitored quantities, mesh independence, boundary conditions,
-and validation against appropriate reference data. A high Courant number
-requires context-specific assessment; it is not automatically proof of failure.
+  <strong>Engineering limitation:</strong>
+  A completion marker and low residuals do not independently establish
+  convergence or physical accuracy. Review residual histories,
+  conservation balances, monitored quantities, mesh independence,
+  boundary conditions, and validation against appropriate reference data.
+  A high Courant number requires context-specific assessment; it is not
+  automatically proof of failure.
 </div>
 
-<details>
-<summary><strong>Diagnostic data (JSON)</strong></summary>
-<pre>{safe_diagnostics}</pre>
-</details>
+<section>
+  <h2>Diagnostic data (JSON)</h2>
+  <details>
+    <summary>Show diagnostic data</summary>
+    <pre>{safe_diagnostics}</pre>
+  </details>
+</section>
 
-<details>
-<summary><strong>Residual data (JSON)</strong></summary>
-<pre>{safe_residuals}</pre>
-</details>
+<section>
+  <h2>Residual data (JSON)</h2>
+  <details>
+    <summary>Show residual analysis data</summary>
+    <pre>{safe_residuals}</pre>
+  </details>
+</section>
 
-<footer>Generated by SimuNexa CAE Copilot.</footer>
+<footer>
+  Generated by SimuNexa CAE Copilot.
+</footer>
 </body>
 </html>
 """
 
-    output.write_text(report_html, encoding="utf-8")
+    # Keep the report portable by copying any existing plot images
+    # into the report's adjacent residual_plots directory.
+    source_plot_dir = Path("reports/residual_plots")
+    if source_plot_dir.is_dir() and source_plot_dir != plot_dir:
+        plot_dir.mkdir(parents=True, exist_ok=True)
+        for image in source_plot_dir.glob("residual_*.png"):
+            destination = plot_dir / image.name
+            if image.resolve() != destination.resolve():
+                shutil.copy2(image, destination)
+
+    output.write_text(
+        report_html,
+        encoding="utf-8",
+    )
+
     return output
 
