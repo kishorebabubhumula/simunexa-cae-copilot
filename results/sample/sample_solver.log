@@ -1,0 +1,15 @@
+Starting time loop
+
+Time = 1
+
+smoothSolver:  Solving for Ux, Initial residual = 0.12, Final residual = 0.0012, No Iterations 2
+smoothSolver:  Solving for Uy, Initial residual = 0.10, Final residual = 0.0010, No Iterations 2
+GAMG:  Solving for p, Initial residual = 0.25, Final residual = 0.0040, No Iterations 3
+
+Time = 2
+
+smoothSolver:  Solving for Ux, Initial residual = 0.0012, Final residual = 0.00008, No Iterations 2
+smoothSolver:  Solving for Uy, Initial residual = 0.0010, Final residual = 0.00007, No Iterations 2
+GAMG:  Solving for p, Initial residual = 0.0040, Final residual = 0.0005, No Iterations 3
+
+End
