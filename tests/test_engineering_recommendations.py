@@ -298,3 +298,45 @@ def test_default_mesh_thresholds_preserve_existing_behavior():
     ]
 
     assert mesh_titles == []
+
+
+import pytest
+
+
+@pytest.mark.parametrize(
+    ("trend", "expected_title"),
+    [
+        ("decreasing", "decreasing residual trend"),
+        ("stagnating", "stagnating residual"),
+        ("increasing", "increasing residual"),
+        ("insufficient_data", "collect more residual data"),
+    ],
+)
+def test_explicit_residual_trends_generate_recommendations(
+    trend,
+    expected_title,
+):
+    results = generate_recommendations(
+        {"fatal_error": False, "solver_completed": True},
+        {
+            "residuals": {
+                "U": {
+                    "trend": trend,
+                    "sample_count": 1 if trend == "insufficient_data" else 5,
+                    "below_tolerance": False,
+                    "decreasing_overall": trend == "decreasing",
+                    "increases_count": 0,
+                }
+            }
+        },
+    )
+
+    assert any(
+        expected_title in item["title"].lower()
+        for item in results
+    )
+    assert all(
+        {"priority", "title", "evidence", "action", "limitation"}
+        .issubset(item)
+        for item in results
+    )

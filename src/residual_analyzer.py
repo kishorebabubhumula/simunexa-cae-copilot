@@ -135,6 +135,27 @@ def analyze_residuals(
             )
         )
 
+        # Classify the overall trend using a relative-change threshold.
+        # This is a trend indicator, not proof of convergence.
+        trend_tolerance = 0.05
+
+        if len(values) < 2:
+            trend = "insufficient_data"
+        elif initial == 0:
+            if final == 0:
+                trend = "stagnating"
+            else:
+                trend = "increasing"
+        else:
+            relative_change = (final - initial) / abs(initial)
+
+            if relative_change < -trend_tolerance:
+                trend = "decreasing"
+            elif relative_change > trend_tolerance:
+                trend = "increasing"
+            else:
+                trend = "stagnating"
+
         results[column] = {
             "initial": initial,
             "final": final,
@@ -144,6 +165,8 @@ def analyze_residuals(
             "monotonic_decrease": monotonic_decrease,
             "increases_count": increases_count,
             "sample_count": len(values),
+            "trend": trend,
+            "trend_tolerance": trend_tolerance,
         }
 
     if not results:

@@ -207,6 +207,7 @@ def generate_recommendations(
         below_tolerance = metrics.get("below_tolerance")
         decreasing = metrics.get("decreasing_overall")
         increases = metrics.get("increases_count")
+        trend = metrics.get("trend")
 
         try:
             increase_count = int(increases) if increases is not None else 0
@@ -226,28 +227,89 @@ def generate_recommendations(
                 "criterion.",
             )
 
-        if decreasing is False or increase_count > 0:
-            add(
-                "Review",
-                f"Inspect residual trend for {variable}",
-                f"Residual increases were recorded for {variable}: "
-                f"{increase_count}.",
-                "Inspect the residual plot alongside physical monitors "
-                "and conservation balances. Determine whether increases "
-                "are transient behavior, oscillation, or a numerical issue.",
-                "Residual increases can occur in transient and iterative "
-                "solvers; the count alone does not diagnose failure.",
-            )
-
-        if below_tolerance is True and decreasing is True:
+        if trend == "decreasing":
             add(
                 "Info",
-                f"Residual reduction observed for {variable}",
-                "The final residual is below the selected tolerance and "
-                "the overall trend is decreasing.",
-                "Confirm that monitored quantities and conservation "
+                f"Decreasing residual trend for {variable}",
+                f"The overall residual trend for {variable} is decreasing.",
+                "Check the final residual against the selected tolerance "
+                "and confirm that physical monitors and conservation "
                 "balances are also acceptable.",
-                "These indicators alone do not prove convergence.",
+                "A decreasing residual trend alone does not prove convergence.",
+            )
+
+        elif trend == "stagnating":
+            add(
+                "Review",
+                f"Investigate stagnating residual for {variable}",
+                f"The overall residual trend for {variable} is classified "
+                "as stagnating.",
+                "Review discretization schemes, solver settings, mesh "
+                "quality, and monitored physical quantities.",
+                "Stagnation is a screening indicator; assess the complete "
+                "residual history and physical behavior.",
+            )
+
+        elif trend == "increasing":
+            add(
+                "Review",
+                f"Investigate increasing residual for {variable}",
+                f"The overall residual trend for {variable} is increasing.",
+                "Inspect boundary conditions, time-step or relaxation "
+                "settings, numerical schemes, and physical monitors.",
+                "An increasing trend warrants investigation but does not "
+                "by itself identify the cause of the behavior.",
+            )
+
+        elif trend == "insufficient_data":
+            add(
+                "Review",
+                f"Collect more residual data for {variable}",
+                f"There are only {metrics.get('sample_count', 0)} usable "
+                f"residual samples for {variable}.",
+                "Collect additional residual samples before interpreting "
+                "the trend, and review the final residual and physical monitors.",
+                "Insufficient samples do not support a reliable trend "
+                "classification.",
+            )
+
+        elif trend is None:
+            # Preserve compatibility with older residual-analysis results.
+            if decreasing is False or increase_count > 0:
+                add(
+                    "Review",
+                    f"Inspect residual trend for {variable}",
+                    f"Residual increases were recorded for {variable}: "
+                    f"{increase_count}.",
+                    "Inspect the residual plot alongside physical monitors "
+                    "and conservation balances. Determine whether increases "
+                    "are transient behavior, oscillation, or a numerical issue.",
+                    "Residual increases can occur in transient and iterative "
+                    "solvers; the count alone does not diagnose failure.",
+                )
+
+            if below_tolerance is True and decreasing is True:
+                add(
+                    "Info",
+                    f"Residual reduction observed for {variable}",
+                    "The final residual is below the selected tolerance and "
+                    "the overall trend is decreasing.",
+                    "Confirm that monitored quantities and conservation "
+                    "balances are also acceptable.",
+                    "These indicators alone do not prove convergence.",
+                )
+
+        if trend == "decreasing" and increase_count > 0:
+            add(
+                "Review",
+                f"Review residual fluctuations for {variable}",
+                f"The overall trend decreases, but {increase_count} "
+                "successive-sample increases were recorded.",
+                "Inspect the residual plot and determine whether the "
+                "increases are transient, oscillatory, or associated with "
+                "numerical instability.",
+                "An overall decrease can conceal fluctuations within the "
+                "residual history.",
             )
 
     if not residual_analysis:

@@ -247,3 +247,44 @@ def test_rejects_blank_residual_history(tmp_path):
     with pytest.raises(ValueError, match="No usable residual"):
         analyze_residuals(csv_file)
 
+
+
+@pytest.mark.parametrize(
+    ("values", "expected_trend"),
+    [
+        ([0.1, 0.01, 0.001], "decreasing"),
+        ([0.1, 0.102, 0.099], "stagnating"),
+        ([0.01, 0.02, 0.03], "increasing"),
+        ([0.001], "insufficient_data"),
+    ],
+)
+def test_classifies_residual_trends(
+    tmp_path,
+    values,
+    expected_trend,
+):
+    csv_file = tmp_path / "trend.csv"
+    rows = [
+        {"iteration": str(index), "Ux": str(value)}
+        for index, value in enumerate(values, start=1)
+    ]
+    write_residual_csv(csv_file, rows)
+
+    result = analyze_residuals(csv_file)
+    ux = result["residuals"]["Ux"]
+
+    assert ux["trend"] == expected_trend
+    assert ux["trend_tolerance"] == pytest.approx(0.05)
+
+
+def test_zero_residual_history_is_stagnating(tmp_path):
+    csv_file = tmp_path / "zero_history.csv"
+    rows = [
+        {"iteration": "1", "Ux": "0"},
+        {"iteration": "2", "Ux": "0"},
+    ]
+    write_residual_csv(csv_file, rows)
+
+    result = analyze_residuals(csv_file)
+
+    assert result["residuals"]["Ux"]["trend"] == "stagnating"
