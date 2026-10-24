@@ -1,5 +1,5 @@
 
-"""Generate a self-contained HTML report for SimuNexa CAE Copilot."""
+"""Generate an HTML report for SimuNexa CAE Copilot."""
 
 import html
 import json
@@ -9,13 +9,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from src.engineering_recommendations import generate_recommendations
+
 
 def generate_report(
     diagnostics: dict[str, Any],
     output_path: str | Path,
     residual_analysis: dict[str, Any] | None = None,
 ) -> Path:
-    """Generate an HTML CFD diagnostics report with residual plots."""
+    """Generate an HTML CFD diagnostics report with recommendations."""
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -53,7 +55,6 @@ def generate_report(
     errors = diagnostics.get("errors", [])
     courant_values = diagnostics.get("courant_max", [])
 
-    # Validate Courant values before calculating statistics.
     valid_courant = []
     for value in courant_values:
         try:
@@ -83,11 +84,9 @@ def generate_report(
     def list_html(items: list[Any], empty_message: str) -> str:
         if not items:
             return f"<li>{escape(empty_message)}</li>"
-        return "".join(
-            f"<li>{escape(item)}</li>" for item in items
-        )
+        return "".join(f"<li>{escape(item)}</li>" for item in items)
 
-    # Residual summary table.
+    # Prepare residual summary table.
     residuals = (
         residual_analysis.get("residuals", {})
         if residual_analysis
@@ -140,13 +139,47 @@ def generate_report(
         if residual_analysis
         else ""
     )
+
     residual_note_html = (
         f"<p class='explanation'>{escape(residual_note)}</p>"
         if residual_note
         else ""
     )
 
-    # Copy plots into the report folder so relative image links work.
+    # Generate engineering recommendations.
+    recommendations = generate_recommendations(
+        diagnostics,
+        residual_analysis,
+    )
+
+    recommendation_rows = []
+
+    for item in recommendations:
+        recommendation_rows.append(
+            "<tr>"
+            f"<td>{escape(item.get('priority', 'Info'))}</td>"
+            f"<td>{escape(item.get('title', ''))}</td>"
+            f"<td>{escape(item.get('evidence', ''))}</td>"
+            f"<td>{escape(item.get('action', ''))}</td>"
+            f"<td>{escape(item.get('limitation', ''))}</td>"
+            "</tr>"
+        )
+
+    recommendations_html = (
+        "<table><thead><tr>"
+        "<th>Priority</th>"
+        "<th>Finding</th>"
+        "<th>Evidence</th>"
+        "<th>Recommended action</th>"
+        "<th>Limitation</th>"
+        "</tr></thead><tbody>"
+        + "".join(recommendation_rows)
+        + "</tbody></table>"
+        if recommendation_rows
+        else "<p>No engineering recommendations are available.</p>"
+    )
+
+    # Locate residual plots beside the HTML report.
     plot_dir = output.parent / "residual_plots"
     plot_images = []
 
@@ -194,6 +227,7 @@ def generate_report(
             default=str,
         )
     )
+
     safe_residuals = escape(
         json.dumps(
             residual_analysis or {},
@@ -203,12 +237,19 @@ def generate_report(
         )
     )
 
+    safe_recommendations = escape(
+        json.dumps(
+            recommendations,
+            indent=2,
+            ensure_ascii=False,
+            default=str,
+        )
+    )
+
     generated = datetime.now(timezone.utc).isoformat(
         timespec="seconds"
     )
-    log_file = escape(
-        diagnostics.get("file", "Not specified")
-    )
+    log_file = escape(diagnostics.get("file", "Not specified"))
 
     report_html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -220,7 +261,6 @@ def generate_report(
 :root {{
   color-scheme: light;
   --navy: #142b4a;
-  --blue: #2457a7;
   --border: #d8e0e9;
   --muted: #596579;
   --surface: #f5f8fc;
@@ -228,7 +268,7 @@ def generate_report(
 * {{ box-sizing: border-box; }}
 body {{
   font-family: Arial, Helvetica, sans-serif;
-  max-width: 1120px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 28px;
   color: #202938;
@@ -288,6 +328,7 @@ th, td {{
   border: 1px solid var(--border);
   padding: 10px;
   text-align: left;
+  vertical-align: top;
   overflow-wrap: anywhere;
 }}
 th {{ background: var(--surface); }}
@@ -412,6 +453,16 @@ footer {{
 </section>
 
 <section>
+  <h2>Engineering Recommendations</h2>
+  <p class="explanation">Recommendations are generated from available log diagnostics and residual metrics. Review them using engineering judgment.</p>
+  {recommendations_html}
+  <details>
+    <summary>Show recommendation data (JSON)</summary>
+    <pre>{safe_recommendations}</pre>
+  </details>
+</section>
+
+<section>
   <h2>Residual convergence plots</h2>
   {plots_html}
 </section>
@@ -449,8 +500,7 @@ footer {{
 </html>
 """
 
-    # Keep the report portable by copying any existing plot images
-    # into the report's adjacent residual_plots directory.
+    # Copy any existing plots beside the generated report.
     source_plot_dir = Path("reports/residual_plots")
     if source_plot_dir.is_dir() and source_plot_dir != plot_dir:
         plot_dir.mkdir(parents=True, exist_ok=True)
@@ -459,10 +509,6 @@ footer {{
             if image.resolve() != destination.resolve():
                 shutil.copy2(image, destination)
 
-    output.write_text(
-        report_html,
-        encoding="utf-8",
-    )
-
+    output.write_text(report_html, encoding="utf-8")
     return output
 
