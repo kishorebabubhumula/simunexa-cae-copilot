@@ -5,3 +5,4 @@ __pycache__/
 reports/
 .env
 .ipynb_checkpoints/
+data/pitzDaily_residual_records.csv
