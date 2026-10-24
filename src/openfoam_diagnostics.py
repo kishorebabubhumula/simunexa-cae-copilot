@@ -5,8 +5,14 @@ from pathlib import Path
 import re
 
 
-def analyze_openfoam_log(log_path):
-    """Extract basic solver status, residuals, Courant numbers and warnings."""
+def analyze_openfoam_log(log_path, courant_threshold=5.0):
+    """Extract solver status, residuals, Courant numbers and warnings."""
+    if (
+        isinstance(courant_threshold, bool)
+        or not isinstance(courant_threshold, (int, float))
+        or courant_threshold < 0
+    ):
+        raise ValueError("Courant threshold must be a non-negative number.")
     path = Path(log_path)
 
     if not path.is_file():
@@ -20,6 +26,8 @@ def analyze_openfoam_log(log_path):
         "fatal_error": False,
         "residual_records": 0,
         "courant_max": [],
+        "courant_threshold": courant_threshold,
+        "courant_exceedances": 0,
         "warnings": [],
         "errors": [],
         "summary": [],
@@ -52,6 +60,9 @@ def analyze_openfoam_log(log_path):
     result["courant_max"] = [
         float(value) for value in courant_pattern.findall(text)
     ]
+    result["courant_exceedances"] = sum(
+        value > courant_threshold for value in result["courant_max"]
+    )
 
     result["warnings"] = [
         line.strip()
@@ -62,7 +73,14 @@ def analyze_openfoam_log(log_path):
     result["errors"] = [
         line.strip()
         for line in text.splitlines()
-        if "error" in line.lower() or "fatal" in line.lower()
+        if (
+            "FOAM FATAL ERROR" in line.upper()
+            or "FOAM FATAL IO ERROR" in line.upper()
+            or "FLOATING POINT EXCEPTION" in line.upper()
+            or "FOAM ERROR" in line.upper()
+            or "FOAM IO ERROR" in line.upper()
+        )
+        and "ENABLING FLOATING POINT EXCEPTION TRAPPING" not in line.upper()
     ]
 
     if result["fatal_error"]:

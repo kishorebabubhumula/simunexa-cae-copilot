@@ -1,8 +1,10 @@
 
-"""Generate an HTML report from SimuNexa CAE diagnostics."""
+"""Generate a self-contained HTML report for SimuNexa CAE Copilot."""
 
 import html
 import json
+import math
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,156 +15,358 @@ def generate_report(
     output_path: str | Path,
     residual_analysis: dict[str, Any] | None = None,
 ) -> Path:
-    """Write a self-contained HTML engineering report."""
+    """Generate an HTML CFD diagnostics report with residual plots."""
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
 
     def escape(value: Any) -> str:
-        return html.escape(str(value))
+        return html.escape(str(value), quote=True)
 
-    status = (
-        "FATAL ERROR"
-        if diagnostics.get("fatal_error")
-        else "COMPLETION MARKER FOUND"
-        if diagnostics.get("solver_completed")
-        else "COMPLETION NOT CONFIRMED"
-    )
+    def fmt(value: Any) -> str:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return f"{value:.6g}"
+        return str(value) if value is not None else "Not available"
 
-    status_color = (
-        "#b42318"
-        if diagnostics.get("fatal_error")
-        else "#18794e"
-        if diagnostics.get("solver_completed")
-        else "#9a6700"
-    )
+    fatal = bool(diagnostics.get("fatal_error"))
+    completed = bool(diagnostics.get("solver_completed"))
+
+    if fatal:
+        status = "FATAL ERROR"
+        status_color = "#b42318"
+    elif completed:
+        status = "COMPLETION MARKER FOUND"
+        status_color = "#18794e"
+    else:
+        status = "COMPLETION NOT CONFIRMED"
+        status_color = "#9a6700"
 
     summary_items = diagnostics.get("summary", [])
-    warning_items = diagnostics.get("warnings", [])
-    error_items = diagnostics.get("errors", [])
+    warnings = diagnostics.get("warnings", [])
+    errors = diagnostics.get("errors", [])
     courant_values = diagnostics.get("courant_max", [])
 
-    diagnostic_rows = []
-    for item in summary_items:
-        diagnostic_rows.append(f"<li>{escape(item)}</li>")
+    # Courant statistics.
+    valid_courant = []
+    for value in courant_values:
+        try:
+            number = float(value)
+            if math.isfinite(number) and number >= 0:
+                valid_courant.append(number)
+        except (TypeError, ValueError):
+            continue
 
-    warning_rows = [
-        f"<li>{escape(item)}</li>" for item in warning_items
-    ]
-    error_rows = [
-        f"<li>{escape(item)}</li>" for item in error_items
-    ]
+    threshold = diagnostics.get("courant_threshold")
+    try:
+        threshold = float(threshold)
+        if not math.isfinite(threshold) or threshold < 0:
+            threshold = None
+    except (TypeError, ValueError):
+        threshold = None
+
+    exceedances = (
+        sum(value > threshold for value in valid_courant)
+        if threshold is not None
+        else diagnostics.get("courant_exceedances", "Not available")
+    )
+
+    max_courant = max(valid_courant) if valid_courant else None
+    final_courant = valid_courant[-1] if valid_courant else None
+
+    def list_html(items: list[Any], empty_message: str) -> str:
+        if not items:
+            return f"<li>{escape(empty_message)}</li>"
+        return "".join(f"<li>{escape(item)}</li>" for item in items)
+
+    # Residual summary table.
+    residuals = (
+        residual_analysis.get("residuals", {})
+        if residual_analysis
+        else {}
+    )
 
     residual_rows = []
-    if residual_analysis:
-        for name, metrics in residual_analysis.get(
-            "residuals", {}
-        ).items():
-            ratio = metrics.get("reduction_ratio")
-            ratio_text = (
-                "undefined"
-                if ratio is None
-                else f"{ratio:.6g}"
+    for variable, metrics in sorted(residuals.items()):
+        ratio = metrics.get("reduction_ratio")
+        ratio_text = "Undefined" if ratio is None else fmt(ratio)
+        below = metrics.get("below_tolerance")
+
+        residual_rows.append(
+            "<tr>"
+            f"<td>{escape(variable)}</td>"
+            f"<td>{escape(fmt(metrics.get('initial')))}</td>"
+            f"<td>{escape(fmt(metrics.get('final')))}</td>"
+            f"<td>{escape(ratio_text)}</td>"
+            f"<td>{'Yes' if below is True else 'No' if below is False else 'Unknown'}</td>"
+            "</tr>"
+        )
+
+    if residual_rows:
+        residual_table = (
+            "<table><thead><tr>"
+            "<th>Variable</th><th>Initial residual</th>"
+            "<th>Final residual</th><th>Final / initial</th>"
+            "<th>Below tolerance</th></tr></thead><tbody>"
+            + "".join(residual_rows)
+            + "</tbody></table>"
+        )
+    else:
+        residual_table = "<p>No residual analysis was supplied.</p>"
+
+    # Copy plots into the report's own folder so relative image links work.
+    plot_dir = output.parent / "residual_plots"
+    plot_images = []
+
+    if residuals and plot_dir.is_dir():
+        for variable in sorted(residuals):
+            # Prevent unexpected variable names from becoming file paths.
+            safe_name = "".join(
+                char for char in str(variable)
+                if char.isalnum() or char in "_-"
             )
-            residual_rows.append(
-                "<tr>"
-                f"<td>{escape(name)}</td>"
-                f"<td>{escape(metrics.get('initial'))}</td>"
-                f"<td>{escape(metrics.get('final'))}</td>"
-                f"<td>{escape(ratio_text)}</td>"
-                f"<td>{'Yes' if metrics.get('below_tolerance') else 'No'}</td>"
-                "</tr>"
+            if not safe_name:
+                continue
+
+            image_path = plot_dir / f"residual_{safe_name}.png"
+            if not image_path.is_file():
+                continue
+
+            relative_image = image_path.relative_to(output.parent).as_posix()
+            plot_images.append(
+                "<figure class='plot-card'>"
+                f"<img src='{escape(relative_image)}' "
+                f"alt='Residual history for {escape(variable)}'>"
+                f"<figcaption>{escape(variable)} residual history</figcaption>"
+                "</figure>"
             )
 
-    residual_table = (
-        "<table><thead><tr>"
-        "<th>Variable</th><th>Initial residual</th>"
-        "<th>Final residual</th><th>Final / initial</th>"
-        "<th>Below tolerance</th></tr></thead><tbody>"
-        + "".join(residual_rows)
-        + "</tbody></table>"
-        if residual_rows
-        else "<p>No residual analysis was supplied.</p>"
+    plots_html = (
+        "<div class='plot-grid'>" + "".join(plot_images) + "</div>"
+        if plot_images
+        else (
+            "<p>No residual plots found. Generate plots in the "
+            "'residual_plots' folder to display them here.</p>"
+        )
     )
 
     safe_diagnostics = escape(
-        json.dumps(diagnostics, indent=2, ensure_ascii=False)
+        json.dumps(diagnostics, indent=2, ensure_ascii=False, default=str)
     )
     safe_residuals = escape(
         json.dumps(
             residual_analysis or {},
             indent=2,
             ensure_ascii=False,
+            default=str,
         )
     )
+
+    generated = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    log_file = escape(diagnostics.get("file", "Not specified"))
 
     report_html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SimuNexa CAE Copilot - CFD Report</title>
+<title>SimuNexa CAE Copilot | CFD Diagnostics</title>
 <style>
-body {{ font-family: Arial, sans-serif; max-width: 1050px;
-       margin: 35px auto; padding: 0 20px; color: #202938;
-       line-height: 1.5; }}
-header {{ border-bottom: 3px solid #2457a7; padding-bottom: 16px; }}
-h1 {{ margin-bottom: 4px; }}
-h2 {{ margin-top: 32px; border-bottom: 1px solid #d0d7de;
-      padding-bottom: 6px; }}
-.status {{ display: inline-block; padding: 7px 12px;
-           color: white; border-radius: 5px;
-           background: {status_color}; font-weight: bold; }}
-table {{ border-collapse: collapse; width: 100%; margin: 14px 0; }}
-th, td {{ border: 1px solid #d0d7de; padding: 9px;
-          text-align: left; overflow-wrap: anywhere; }}
-th {{ background: #f0f4f8; }}
-pre {{ white-space: pre-wrap; overflow-wrap: anywhere;
-       background: #f6f8fa; padding: 14px; border-radius: 5px; }}
-.note {{ background: #fff8c5; padding: 12px; border-radius: 5px; }}
-footer {{ margin-top: 40px; color: #57606a; font-size: 0.9em; }}
+:root {{
+  color-scheme: light;
+  --navy: #142b4a;
+  --blue: #2457a7;
+  --border: #d8e0e9;
+  --muted: #596579;
+  --surface: #f5f8fc;
+}}
+* {{ box-sizing: border-box; }}
+body {{
+  font-family: Arial, Helvetica, sans-serif;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 28px;
+  color: #202938;
+  line-height: 1.55;
+  background: #fff;
+}}
+header {{
+  padding: 24px;
+  color: white;
+  background: var(--navy);
+  border-radius: 12px;
+}}
+header h1 {{ margin: 0 0 5px; }}
+header p {{ margin: 5px 0; }}
+.status {{
+  display: inline-block;
+  padding: 7px 12px;
+  margin-top: 10px;
+  color: white;
+  border-radius: 5px;
+  background: {status_color};
+  font-weight: bold;
+}}
+h2 {{
+  margin-top: 30px;
+  padding-bottom: 7px;
+  border-bottom: 2px solid var(--border);
+  color: var(--navy);
+}}
+.summary-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  margin: 18px 0;
+}}
+.metric {{
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}}
+.metric .label {{ color: var(--muted); font-size: 0.9em; }}
+.metric .value {{
+  margin-top: 5px;
+  font-size: 1.35em;
+  font-weight: bold;
+  overflow-wrap: anywhere;
+}}
+table {{
+  width: 100%;
+  border-collapse: collapse;
+  margin: 14px 0 22px;
+}}
+th, td {{
+  border: 1px solid var(--border);
+  padding: 10px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}}
+th {{ background: var(--surface); }}
+.plot-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 18px;
+}}
+.plot-card {{
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}}
+.plot-card img {{ display: block; width: 100%; height: auto; }}
+.plot-card figcaption {{
+  margin-top: 8px;
+  text-align: center;
+  font-weight: bold;
+}}
+.note {{
+  margin-top: 22px;
+  padding: 16px;
+  border-left: 5px solid #d99a18;
+  background: #fff8e5;
+  border-radius: 5px;
+}}
+pre {{
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 520px;
+  overflow: auto;
+  background: var(--surface);
+  padding: 14px;
+  border-radius: 7px;
+  font-size: 0.85em;
+}}
+footer {{
+  margin-top: 38px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.9em;
+}}
+@media (max-width: 600px) {{
+  body {{ padding: 12px; }}
+  header {{ padding: 17px; }}
+  .plot-grid {{ grid-template-columns: 1fr; }}
+}}
 </style>
 </head>
 <body>
 <header>
-<h1>SimuNexa CAE Copilot</h1>
-<p>CFD Solver Diagnostics Report</p>
-<p class="status">{escape(status)}</p>
+  <h1>SimuNexa CAE Copilot</h1>
+  <p>CFD Solver Diagnostics Report</p>
+  <p class="status">{escape(status)}</p>
 </header>
 
 <h2>Report information</h2>
-<p><strong>Generated (UTC):</strong>
-{datetime.now(timezone.utc).isoformat(timespec="seconds")}</p>
-<p><strong>Log file:</strong>
-{escape(diagnostics.get("file", "Not specified"))}</p>
+<p><strong>Generated (UTC):</strong> {escape(generated)}</p>
+<p><strong>OpenFOAM log:</strong> {log_file}</p>
 
-<h2>Diagnostic summary</h2>
-<ul>{"".join(diagnostic_rows) or "<li>No summary messages.</li>"}</ul>
+<h2>Diagnostic overview</h2>
+<div class="summary-grid">
+  <div class="metric">
+    <div class="label">Solver completion</div>
+    <div class="value">{'Confirmed' if completed else 'Not confirmed'}</div>
+  </div>
+  <div class="metric">
+    <div class="label">Fatal error detected</div>
+    <div class="value">{'Yes' if fatal else 'No'}</div>
+  </div>
+  <div class="metric">
+    <div class="label">Maximum Courant number</div>
+    <div class="value">{escape(fmt(max_courant))}</div>
+  </div>
+  <div class="metric">
+    <div class="label">Residual records</div>
+    <div class="value">{escape(diagnostics.get('residual_records', 'Not available'))}</div>
+  </div>
+</div>
+
+<ul>{list_html(summary_items, "No summary messages.")}</ul>
 
 <h2>Courant numbers</h2>
-<p>Reported maximum values: {escape(courant_values or "None found")}</p>
+<table>
+<tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Number of valid samples</td><td>{len(valid_courant)}</td></tr>
+<tr><td>Maximum Courant number</td><td>{escape(fmt(max_courant))}</td></tr>
+<tr><td>Final reported Courant number</td><td>{escape(fmt(final_courant))}</td></tr>
+<tr><td>Reporting threshold</td><td>{escape(fmt(threshold))}</td></tr>
+<tr><td>Samples above threshold</td><td>{escape(exceedances)}</td></tr>
+</table>
+<p>The threshold is a diagnostic flag, not a universal stability limit.
+Interpret it according to the solver, time scheme, mesh and case settings.</p>
 
 <h2>Warnings</h2>
-<ul>{"".join(warning_rows) or "<li>No warnings detected.</li>"}</ul>
+<ul>{list_html(warnings, "No warnings detected by the log parser.")}</ul>
 
 <h2>Errors</h2>
-<ul>{"".join(error_rows) or "<li>No error messages detected.</li>"}</ul>
+<ul>{list_html(errors, "No error messages detected by the log parser.")}</ul>
 
 <h2>Residual analysis</h2>
 {residual_table}
 
+<h2>Residual convergence plots</h2>
+{plots_html}
+
 <div class="note">
-<strong>Engineering limitation:</strong> A completion marker and decreasing
-residuals do not independently establish convergence or physical accuracy.
-Review conservation balances, monitored quantities, mesh independence,
-boundary conditions, and validation against appropriate reference data.
+<strong>Engineering limitation:</strong>
+A completion marker and low residuals do not independently establish
+convergence or physical accuracy. Review residual histories, conservation
+balances, monitored quantities, mesh independence, boundary conditions,
+and validation against appropriate reference data. A high Courant number
+requires context-specific assessment; it is not automatically proof of failure.
 </div>
 
-<h2>Diagnostic data (JSON)</h2>
+<details>
+<summary><strong>Diagnostic data (JSON)</strong></summary>
 <pre>{safe_diagnostics}</pre>
+</details>
 
-<h2>Residual data (JSON)</h2>
+<details>
+<summary><strong>Residual data (JSON)</strong></summary>
 <pre>{safe_residuals}</pre>
+</details>
 
 <footer>Generated by SimuNexa CAE Copilot.</footer>
 </body>
