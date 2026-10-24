@@ -9,7 +9,7 @@ from src.mesh_diagnostics import analyze_mesh_log
 from src.openfoam_diagnostics import analyze_openfoam_log
 from src.report_generator import generate_report
 from src.residual_analyzer import analyze_residuals
-from src.residual_extractor import extract_residuals_to_csv
+from src.residual_extractor import extract_residuals_to_csv, summarize_residual_records
 
 
 def main() -> int:
@@ -116,7 +116,7 @@ def main() -> int:
             print(f"Extracted residual records: {extraction['records_extracted']}")
             print(f"Residual records CSV: {records_csv}")
 
-            residual_analysis = analyze_residuals(
+            residual_analysis = summarize_residual_records(
                 records_csv,
                 tolerance=args.residual_tolerance,
             )

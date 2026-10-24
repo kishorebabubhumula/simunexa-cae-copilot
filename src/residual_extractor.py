@@ -231,9 +231,29 @@ def summarize_residual_records(
             )
         )
 
+        trend_tolerance = 0.05
+
+        if len(records) < 2:
+            trend = "insufficient_data"
+        elif first_initial == 0:
+            trend = "stagnating" if final_residual == 0 else "increasing"
+        else:
+            relative_change = (
+                (final_residual - first_initial) / abs(first_initial)
+            )
+
+            if relative_change < -trend_tolerance:
+                trend = "decreasing"
+            elif relative_change > trend_tolerance:
+                trend = "increasing"
+            else:
+                trend = "stagnating"
+
         summaries[variable] = {
             "initial": first_initial,
             "final": final_residual,
+            "trend": trend,
+            "trend_tolerance": trend_tolerance,
             "reduction_ratio": reduction_ratio,
             "below_tolerance": final_residual <= tolerance,
             "decreasing_overall": final_residual < first_initial,
