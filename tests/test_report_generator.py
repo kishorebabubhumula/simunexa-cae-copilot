@@ -52,6 +52,7 @@ def test_report_includes_residual_trend_indicators(tmp_path: Path):
             "Ux": {
                 "initial": 1.0,
                 "final": 0.001,
+                "trend": "decreasing",
                 "reduction_ratio": 0.001,
                 "below_tolerance": False,
                 "decreasing_overall": True,
@@ -80,6 +81,9 @@ def test_report_includes_residual_trend_indicators(tmp_path: Path):
     assert "Decreasing overall" in content
     assert "0.001" in content
     assert "Residual trends alone do not establish convergence." in content
+    assert "Residual Trend Classification" in content
+    assert "Trend classification" in content
+    assert "decreasing" in content
 
 
 def test_report_handles_missing_trend_metrics(tmp_path: Path):

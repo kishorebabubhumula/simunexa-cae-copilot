@@ -94,6 +94,40 @@ def generate_report(
         if residual_analysis
         else {}
     )
+    # Prepare residual trend classification table.
+    trend_rows = []
+
+    for variable, metrics in sorted(residuals.items()):
+        trend = metrics.get("trend") or "Unknown"
+
+        trend_rows.append(
+            "<tr>"
+            f"<td>{escape(str(variable))}</td>"
+            f"<td>{escape(str(trend))}</td>"
+            f"<td>{escape(fmt(metrics.get('initial')))}</td>"
+            f"<td>{escape(fmt(metrics.get('final')))}</td>"
+            f"<td>{escape(fmt(metrics.get('increases_count')))}</td>"
+            f"<td>{escape(yes_no_unknown(metrics.get('below_tolerance')))}</td>"
+            "</tr>"
+        )
+
+    if trend_rows:
+        residual_trend_table = (
+            "<table><thead><tr>"
+            "<th>Variable</th>"
+            "<th>Trend classification</th>"
+            "<th>Initial residual</th>"
+            "<th>Final residual</th>"
+            "<th>Residual increases</th>"
+            "<th>Below tolerance</th>"
+            "</tr></thead><tbody>"
+            + "".join(trend_rows)
+            + "</tbody></table>"
+        )
+    else:
+        residual_trend_table = (
+            "<p>No residual trend data is available.</p>"
+        )
 
     residual_rows = []
 
@@ -520,6 +554,13 @@ footer {{
   <h2>Residual analysis</h2>
   {residual_table}
   {residual_note_html}
+
+  <h3>Residual Trend Classification</h3>
+  <p class="explanation">
+    Trend classifications describe observed residual behaviour.
+    They do not independently establish solver convergence.
+  </p>
+  {residual_trend_table}
 </section>
 
 <section>
