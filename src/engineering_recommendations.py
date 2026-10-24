@@ -1,18 +1,22 @@
-
 """Evidence-based engineering recommendations for CFD diagnostics."""
 
+import math
 from typing import Any
+
 
 
 def generate_recommendations(
     diagnostics: dict[str, Any],
     residual_analysis: dict[str, Any] | None = None,
+    mesh_analysis: dict[str, Any] | None = None,
+    mesh_thresholds: dict[str, float] | None = None,
 ) -> list[dict[str, str]]:
     """Generate review recommendations from available diagnostic evidence.
 
     These rules flag items for engineering review; they do not prove
     convergence, stability, or physical accuracy.
     """
+
     recommendations: list[dict[str, str]] = []
 
     def add(
@@ -111,7 +115,87 @@ def generate_recommendations(
                 "Being below this threshold does not prove stability "
                 "or accuracy.",
             )
+    # Mesh-quality recommendations.
+    if mesh_analysis is not None:
+        if not mesh_analysis.get("mesh_ok", False):
+            add(
+                "Review",
+                "Investigate mesh quality-check result",
+                "The mesh report does not contain the expected Mesh OK marker.",
+                "Inspect the complete checkMesh output, failed checks, "
+                "mesh topology, and local cell-quality metrics.",
+                "A missing marker may mean the check failed, the log was "
+                "truncated, or the report format differs.",
+            )
 
+        failed_checks = mesh_analysis.get("failed_checks", [])
+        if failed_checks:
+            add(
+                "Review",
+                "Review mesh checks reported as failed",
+                f"The mesh log contains {len(failed_checks)} potential "
+                "failed-check message(s).",
+                "Review the listed messages in the original checkMesh log "
+                "and identify the affected mesh regions.",
+                "Text matching alone does not establish the severity "
+                "or cause of a mesh issue.",
+            )
+
+        thresholds = {
+            "max_non_orthogonality": 70.0,
+            "max_skewness": 4.0,
+            "max_aspect_ratio": 100.0,
+        }
+        if mesh_thresholds:
+            thresholds.update(mesh_thresholds)
+
+        mesh_metrics = [
+            (
+                "max_non_orthogonality",
+                thresholds["max_non_orthogonality"],
+                "maximum non-orthogonality",
+                "degrees",
+            ),
+            (
+                "max_skewness",
+                thresholds["max_skewness"],
+                "maximum skewness",
+                "",
+            ),
+            (
+                "max_aspect_ratio",
+                thresholds["max_aspect_ratio"],
+                "maximum aspect ratio",
+                "",
+            ),
+        ]
+
+        for key, threshold_value, label, unit in mesh_metrics:
+            value = mesh_analysis.get(key)
+
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                continue
+
+            if not math.isfinite(value) or value < 0:
+                continue
+
+            if value > threshold_value:
+                unit_text = f" {unit}" if unit else ""
+                add(
+                    "Review",
+                    f"Investigate {label}",
+                    f"Reported {label} is {value:g}{unit_text}, above "
+                    f"the configurable default review threshold of "
+                    f"{threshold_value:g}{unit_text}.",
+                    "Locate the affected cells and assess mesh quality, "
+                    "flow alignment, numerical schemes, and sensitivity "
+                    "of the solution to mesh refinement.",
+                    "This default threshold is a screening rule, not a "
+                    "universal acceptance criterion. Suitability depends "
+                    "on the physics and mesh location.",
+                )
     # Residual trends.
     residuals = (
         residual_analysis.get("residuals", {})

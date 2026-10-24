@@ -66,7 +66,7 @@ def analyze_mesh_log(log_path: str | Path) -> dict[str, Any]:
 
     # Version is usually on a separate line from the OpenFOAM header.
     version_match = re.search(
-        r"^\s*Version:\s*(\S+)",
+        r"\bVersion:\s*(\d+)",
         text,
         re.MULTILINE,
     )

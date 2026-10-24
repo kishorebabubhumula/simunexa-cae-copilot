@@ -16,6 +16,8 @@ def generate_report(
     diagnostics: dict[str, Any],
     output_path: str | Path,
     residual_analysis: dict[str, Any] | None = None,
+    mesh_analysis: dict[str, Any] | None = None,
+    mesh_thresholds: dict[str, float] | None = None,
 ) -> Path:
     """Generate an HTML CFD diagnostics report with recommendations."""
 
@@ -146,10 +148,78 @@ def generate_report(
         else ""
     )
 
+    # Prepare mesh-quality metrics for the HTML report.
+    mesh_metrics = [
+        ("OpenFOAM version", "openfoam_version"),
+        ("Points", "points"),
+        ("Faces", "faces"),
+        ("Internal faces", "internal_faces"),
+        ("Cells", "cells"),
+        ("Boundary patches", "boundary_patches"),
+        ("Maximum aspect ratio", "max_aspect_ratio"),
+        ("Maximum non-orthogonality", "max_non_orthogonality"),
+        ("Average non-orthogonality", "average_non_orthogonality"),
+        ("Maximum skewness", "max_skewness"),
+        ("Maximum cell openness", "max_cell_openness"),
+        ("Mesh OK marker", "mesh_ok"),
+        ("End marker", "end_marker"),
+    ]
+
+    mesh_rows = []
+    if mesh_analysis:
+        for label, key in mesh_metrics:
+            value = mesh_analysis.get(key)
+            if isinstance(value, bool):
+                display_value = "Yes" if value else "No"
+            else:
+                display_value = fmt(value)
+
+            mesh_rows.append(
+                f"<tr><td>{escape(label)}</td>"
+                f"<td>{escape(display_value)}</td></tr>"
+            )
+
+        for item in mesh_analysis.get("summary", []):
+            mesh_rows.append(
+                f"<tr><td>Finding</td><td>{escape(item)}</td></tr>"
+            )
+
+        for item in mesh_analysis.get("failed_checks", []):
+            mesh_rows.append(
+                f"<tr><td>Failed check</td><td>{escape(item)}</td></tr>"
+            )
+
+        for item in mesh_analysis.get("warnings", []):
+            mesh_rows.append(
+                f"<tr><td>Warning</td><td>{escape(item)}</td></tr>"
+            )
+
+    if mesh_rows:
+        mesh_table_html = (
+            "<table><thead><tr><th>Mesh metric</th><th>Value</th></tr></thead>"
+            "<tbody>" + "".join(mesh_rows) + "</tbody></table>"
+        )
+    else:
+        mesh_table_html = (
+            "<p>No mesh-quality report was supplied. "
+            "Use the --mesh-log option to include checkMesh results.</p>"
+        )
+
+    safe_mesh = escape(
+        json.dumps(
+            mesh_analysis or {},
+            indent=2,
+            ensure_ascii=False,
+            default=str,
+        )
+    )
+
     # Generate engineering recommendations.
     recommendations = generate_recommendations(
         diagnostics,
         residual_analysis,
+        mesh_analysis,
+        mesh_thresholds,
     )
 
     recommendation_rows = []
@@ -450,6 +520,15 @@ footer {{
   <h2>Residual analysis</h2>
   {residual_table}
   {residual_note_html}
+</section>
+
+<section>
+  <h2>Mesh Quality Diagnostics</h2>
+  {mesh_table_html}
+  <details>
+    <summary>Show mesh diagnostics data (JSON)</summary>
+    <pre>{safe_mesh}</pre>
+  </details>
 </section>
 
 <section>

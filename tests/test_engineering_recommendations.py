@@ -82,4 +82,219 @@ def test_recommendations_have_required_fields():
 
     assert results
     assert all(required.issubset(item) for item in results)
+def test_poor_mesh_metrics_trigger_recommendations():
+    mesh_analysis = {
+        "mesh_ok": True,
+        "failed_checks": [],
+        "max_non_orthogonality": 80.0,
+        "max_skewness": 5.0,
+        "max_aspect_ratio": 120.0,
+    }
 
+    results = generate_recommendations(
+        {"fatal_error": False, "solver_completed": True},
+        None,
+        mesh_analysis,
+    )
+
+    titles = [item["title"].lower() for item in results]
+
+    assert any("non-orthogonality" in title for title in titles)
+    assert any("skewness" in title for title in titles)
+    assert any("aspect ratio" in title for title in titles)
+
+
+def test_missing_mesh_ok_marker_triggers_review():
+    mesh_analysis = {
+        "mesh_ok": False,
+        "failed_checks": [],
+    }
+
+    results = generate_recommendations(
+        {"fatal_error": False, "solver_completed": True},
+        None,
+        mesh_analysis,
+    )
+
+    assert any(
+        "mesh quality-check" in item["title"].lower()
+        for item in results
+    )
+
+
+def test_mesh_failed_checks_trigger_review():
+    mesh_analysis = {
+        "mesh_ok": True,
+        "failed_checks": ["Example failed check"],
+    }
+
+    results = generate_recommendations(
+        {"fatal_error": False, "solver_completed": True},
+        None,
+        mesh_analysis,
+    )
+
+    assert any(
+        "mesh checks" in item["title"].lower()
+        for item in results
+    )
+
+
+def test_custom_mesh_thresholds_trigger_recommendations():
+    mesh_analysis = {
+        "mesh_ok": True,
+        "failed_checks": [],
+        "max_non_orthogonality": 10.0,
+        "max_skewness": 1.0,
+        "max_aspect_ratio": 20.0,
+    }
+
+    results = generate_recommendations(
+        {"fatal_error": False, "solver_completed": True},
+        None,
+        mesh_analysis,
+        {
+            "max_non_orthogonality": 5.0,
+            "max_skewness": 0.5,
+            "max_aspect_ratio": 15.0,
+        },
+    )
+
+    titles = [item["title"].lower() for item in results]
+
+    assert any("non-orthogonality" in title for title in titles)
+    assert any("skewness" in title for title in titles)
+    assert any("aspect ratio" in title for title in titles)
+
+
+def test_custom_mesh_thresholds_override_defaults():
+    mesh_analysis = {
+        "mesh_ok": True,
+        "failed_checks": [],
+        "max_non_orthogonality": 60.0,
+        "max_skewness": 3.0,
+        "max_aspect_ratio": 80.0,
+    }
+
+    results = generate_recommendations(
+        {"fatal_error": False, "solver_completed": True},
+        None,
+        mesh_analysis,
+        {
+            "max_non_orthogonality": 50.0,
+            "max_skewness": 2.0,
+            "max_aspect_ratio": 70.0,
+        },
+    )
+
+    titles = [item["title"].lower() for item in results]
+
+    assert any("non-orthogonality" in title for title in titles)
+    assert any("skewness" in title for title in titles)
+    assert any("aspect ratio" in title for title in titles)
+
+
+def test_default_mesh_thresholds_preserve_existing_behavior():
+    mesh_analysis = {
+        "mesh_ok": True,
+        "failed_checks": [],
+        "max_non_orthogonality": 60.0,
+        "max_skewness": 3.0,
+        "max_aspect_ratio": 80.0,
+    }
+
+    results = generate_recommendations(
+        {"fatal_error": False, "solver_completed": True},
+        None,
+        mesh_analysis,
+    )
+
+    mesh_titles = [
+        item["title"].lower()
+        for item in results
+        if "non-orthogonality" in item["title"].lower()
+        or "skewness" in item["title"].lower()
+        or "aspect ratio" in item["title"].lower()
+    ]
+
+    assert mesh_titles == []
+
+
+def test_custom_mesh_thresholds_trigger_recommendations():
+    mesh_analysis = {
+        "mesh_ok": True,
+        "failed_checks": [],
+        "max_non_orthogonality": 10.0,
+        "max_skewness": 1.0,
+        "max_aspect_ratio": 20.0,
+    }
+
+    results = generate_recommendations(
+        {"fatal_error": False, "solver_completed": True},
+        None,
+        mesh_analysis,
+        {
+            "max_non_orthogonality": 5.0,
+            "max_skewness": 0.5,
+            "max_aspect_ratio": 15.0,
+        },
+    )
+
+    titles = [item["title"].lower() for item in results]
+
+    assert any("non-orthogonality" in title for title in titles)
+    assert any("skewness" in title for title in titles)
+    assert any("aspect ratio" in title for title in titles)
+
+
+def test_custom_mesh_thresholds_override_defaults():
+    mesh_analysis = {
+        "mesh_ok": True,
+        "failed_checks": [],
+        "max_non_orthogonality": 60.0,
+        "max_skewness": 3.0,
+        "max_aspect_ratio": 80.0,
+    }
+
+    results = generate_recommendations(
+        {"fatal_error": False, "solver_completed": True},
+        None,
+        mesh_analysis,
+        {
+            "max_non_orthogonality": 50.0,
+            "max_skewness": 2.0,
+            "max_aspect_ratio": 70.0,
+        },
+    )
+
+    titles = [item["title"].lower() for item in results]
+
+    assert any("non-orthogonality" in title for title in titles)
+    assert any("skewness" in title for title in titles)
+    assert any("aspect ratio" in title for title in titles)
+
+
+def test_default_mesh_thresholds_preserve_existing_behavior():
+    mesh_analysis = {
+        "mesh_ok": True,
+        "failed_checks": [],
+        "max_non_orthogonality": 60.0,
+        "max_skewness": 3.0,
+        "max_aspect_ratio": 80.0,
+    }
+
+    results = generate_recommendations(
+        {"fatal_error": False, "solver_completed": True},
+        None,
+        mesh_analysis,
+    )
+
+    mesh_titles = [
+        item["title"].lower()
+        for item in results
+        if "non-orthogonality" in item["title"].lower()
+        or "skewness" in item["title"].lower()
+        or "aspect ratio" in item["title"].lower()
+    ]
+
+    assert mesh_titles == []
