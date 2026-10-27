@@ -199,6 +199,24 @@ def generate_report(
         ("End marker", "end_marker"),
     ]
 
+    # These are screening thresholds, not universal mesh acceptance criteria.
+    default_mesh_thresholds = {
+        "max_non_orthogonality": 70.0,
+        "max_skewness": 4.0,
+        "max_aspect_ratio": 100.0,
+    }
+    status_thresholds = default_mesh_thresholds.copy()
+
+    if mesh_thresholds:
+        for key, default_value in default_mesh_thresholds.items():
+            try:
+                candidate = float(mesh_thresholds.get(key, default_value))
+                if not math.isfinite(candidate) or candidate < 0:
+                    candidate = default_value
+            except (TypeError, ValueError):
+                candidate = default_value
+            status_thresholds[key] = candidate
+
     mesh_rows = []
     if mesh_analysis:
         for label, key in mesh_metrics:
@@ -208,30 +226,46 @@ def generate_report(
             else:
                 display_value = fmt(value)
 
+            status = "—"
+            if key in status_thresholds:
+                try:
+                    number = float(value) if not isinstance(value, bool) else float("nan")
+                except (TypeError, ValueError):
+                    number = float("nan")
+
+                if not math.isfinite(number) or number < 0:
+                    status = "Unknown"
+                elif number > status_thresholds[key]:
+                    status = "Review required"
+                else:
+                    status = "Within threshold"
+
             mesh_rows.append(
                 f"<tr><td>{escape(label)}</td>"
-                f"<td>{escape(display_value)}</td></tr>"
+                f"<td>{escape(display_value)}</td>"
+                f"<td>{escape(status)}</td></tr>"
             )
 
         for item in mesh_analysis.get("summary", []):
             mesh_rows.append(
-                f"<tr><td>Finding</td><td>{escape(item)}</td></tr>"
+                f"<tr><td>Finding</td><td colspan='2'>{escape(item)}</td></tr>"
             )
 
         for item in mesh_analysis.get("failed_checks", []):
             mesh_rows.append(
-                f"<tr><td>Failed check</td><td>{escape(item)}</td></tr>"
+                f"<tr><td>Failed check</td><td colspan='2'>{escape(item)}</td></tr>"
             )
 
         for item in mesh_analysis.get("warnings", []):
             mesh_rows.append(
-                f"<tr><td>Warning</td><td>{escape(item)}</td></tr>"
+                f"<tr><td>Warning</td><td colspan='2'>{escape(item)}</td></tr>"
             )
 
     if mesh_rows:
         mesh_table_html = (
-            "<table><thead><tr><th>Mesh metric</th><th>Value</th></tr></thead>"
-            "<tbody>" + "".join(mesh_rows) + "</tbody></table>"
+            "<table><thead><tr>"
+            "<th>Mesh metric</th><th>Value</th><th>Screening status</th>"
+            "</tr></thead><tbody>" + "".join(mesh_rows) + "</tbody></table>"
         )
     else:
         mesh_table_html = (

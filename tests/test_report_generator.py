@@ -123,3 +123,50 @@ def test_report_handles_missing_trend_metrics(tmp_path: Path):
     assert "Not available" in content
     assert "COMPLETION NOT CONFIRMED" in content
 
+
+
+def test_mesh_metrics_include_screening_statuses_and_custom_thresholds(
+    tmp_path: Path,
+):
+    diagnostics = {
+        "file": "log.simpleFoam",
+        "solver_completed": True,
+        "fatal_error": False,
+        "residual_records": 0,
+        "courant_max": [],
+        "warnings": [],
+        "errors": [],
+        "summary": [],
+    }
+    mesh_analysis = {
+        "openfoam_version": "13",
+        "mesh_ok": True,
+        "max_non_orthogonality": 60.0,
+        "max_skewness": 5.0,
+        "max_aspect_ratio": None,
+        "summary": [],
+        "failed_checks": [],
+        "warnings": [],
+    }
+    output_file = tmp_path / "mesh_status_report.html"
+
+    generate_report(
+        diagnostics,
+        output_file,
+        mesh_analysis=mesh_analysis,
+        mesh_thresholds={
+            "max_non_orthogonality": 50.0,
+            "max_skewness": 6.0,
+            "max_aspect_ratio": 100.0,
+        },
+    )
+
+    content = output_file.read_text(encoding="utf-8")
+
+    assert "Screening status" in content
+    assert "Review required" in content
+    assert "Within threshold" in content
+    assert "Unknown" in content
+    assert "Maximum non-orthogonality" in content
+    assert "Maximum skewness" in content
+    assert "Maximum aspect ratio" in content
